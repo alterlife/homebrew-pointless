@@ -7,6 +7,10 @@ on:
     types: [release-published]
   workflow_dispatch:
 
+concurrency:
+  group: sync-cask
+  cancel-in-progress: false
+
 permissions:
   contents: write
 
@@ -21,7 +25,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TAG=$(gh release view --repo alterlife/pointless --json tagName --jq '.tagName')
+          TAG=$(gh release view --repo alterlife/pointless --json tagName --jq '.tagName' || true)
           VERSION="${TAG#v}"
           if [ -z "$VERSION" ]; then
             echo "No release found"
@@ -30,9 +34,9 @@ jobs:
 
           TMP_DIR=$(mktemp -d)
           gh release download "$TAG" --repo alterlife/pointless --pattern "checksums.txt" --dir "$TMP_DIR"
-          DMG_SHA=$(awk '/Pointless\.dmg/ {print $1}' "$TMP_DIR/checksums.txt")
-          if [ -z "$DMG_SHA" ]; then
-            echo "Pointless.dmg checksum not found in checksums.txt" >&2
+          DMG_SHA=$(awk '$2 == "Pointless.dmg" {print $1}' "$TMP_DIR/checksums.txt")
+          if [[ ! "$DMG_SHA" =~ ^[0-9a-f]{64}$ ]]; then
+            echo "Invalid or missing Pointless.dmg sha256: '$DMG_SHA'" >&2
             exit 1
           fi
 
@@ -41,8 +45,8 @@ jobs:
             sha = ARGV[1]
             path = "Casks/pointless.rb"
             content = File.read(path)
-            content.sub!(/version\s+"[^"]+"/, %{version "#{version}"})
-            content.sub!(/sha256\s+(?::no_check|"[^"]+")/, %{sha256 "#{sha}"})
+            abort "Failed to update version in #{path}" unless content.sub!(/version\s+"[^"]+"/, %{version "#{version}"})
+            abort "Failed to update sha256 in #{path}" unless content.sub!(/sha256\s+(?::no_check|"[^"]+")/, %{sha256 "#{sha}"})
             File.write(path, content)
           ' "$VERSION" "$DMG_SHA"
 
