@@ -25,14 +25,21 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TAG=$(gh release view --repo alterlife/pointless --json tagName --jq '.tagName' || true)
+          TMP_DIR=$(mktemp -d)
+          if ! TAG=$(gh release view --repo alterlife/pointless --json tagName --jq '.tagName' 2>"$TMP_DIR/gh.err"); then
+            if grep -qi "release not found" "$TMP_DIR/gh.err"; then
+              echo "No release found"
+              exit 0
+            fi
+            cat "$TMP_DIR/gh.err" >&2
+            exit 1
+          fi
           VERSION="${TAG#v}"
           if [ -z "$VERSION" ]; then
-            echo "No release found"
-            exit 0
+            echo "Empty release tag returned" >&2
+            exit 1
           fi
 
-          TMP_DIR=$(mktemp -d)
           gh release download "$TAG" --repo alterlife/pointless --pattern "checksums.txt" --dir "$TMP_DIR"
           DMG_SHA=$(awk '$2 == "Pointless.dmg" {print $1}' "$TMP_DIR/checksums.txt")
           if [[ ! "$DMG_SHA" =~ ^[0-9a-f]{64}$ ]]; then
